@@ -90,10 +90,11 @@ jobs:
           yarn install --frozen-lockfile
           yarn build
 
-      # 8. Package .vsix file
+      # 8. Package .vsix file (with --allow-unused-files-pattern to handle missing dirs in newer drawio)
       - name: Package VSIX
         if: steps.check.outputs.up-to-date == 'false'
-        run: yarn package-extension-stable
+        run: |
+          npx vsce package --yarn --out ./dist/extension.vsix --allow-unused-files-pattern
 
       # 8.5. Restore original publisher in package.json
       - name: Restore original publisher
