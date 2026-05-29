@@ -80,7 +80,8 @@ jobs:
       # 6.5. Temporarily change publisher to avoid Marketplace auth error
       - name: Set local publisher (bypass Marketplace auth)
         if: steps.check.outputs.up-to-date == 'false'
-        run: sed -i 's/"publisher": "hediet"/"publisher": "ayoubtoueti"/' package.json
+        run: |
+          sed -i 's|"publisher": "hediet"|"publisher": "ayoubtoueti"|' package.json
 
       # 7. Install dependencies and build extension
       - name: Install dependencies and build
@@ -97,7 +98,8 @@ jobs:
       # 8.5. Restore original publisher in package.json
       - name: Restore original publisher
         if: steps.check.outputs.up-to-date == 'false'
-        run: sed -i 's/"publisher": "ayoubtoueti"/"publisher": "hediet"/' package.json
+        run: |
+          sed -i 's|"publisher": "ayoubtoueti"|"publisher": "hediet"|' package.json
 
       # 9. Verify .vsix was created
       - name: Verify VSIX artifact
