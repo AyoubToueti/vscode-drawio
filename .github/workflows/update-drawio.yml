@@ -1,0 +1,148 @@
+name: Update Draw.io to Latest Release
+
+on:
+  schedule:
+    # Poll jgraph/drawio for new releases every 6 hours
+    - cron: '0 */6 * * *'
+  workflow_dispatch: # Manual trigger for testing
+
+jobs:
+  check-and-update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+
+    steps:
+      # 1. Checkout fork with submodules
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+          token: ${{ secrets.GH_PAT }}
+
+      # 2. Fetch latest release tag from jgraph/drawio via GitHub API
+      - name: Get latest jgraph/drawio release
+        id: latest-release
+        run: |
+          LATEST=$(curl -s https://api.github.com/repos/jgraph/drawio/releases/latest | jq -r .tag_name)
+          echo "tag=${LATEST}" >> "$GITHUB_OUTPUT"
+          echo "Latest jgraph/drawio release: ${LATEST}"
+
+      # 3. Get current submodule version from VERSION file
+      - name: Get current version
+        id: current-version
+        run: |
+          if [ -f drawio/VERSION ]; then
+            CURRENT=$(cat drawio/VERSION)
+          else
+            CURRENT="unknown"
+          fi
+          echo "version=${CURRENT}" >> "$GITHUB_OUTPUT"
+          echo "Current bundled version: ${CURRENT}"
+
+      # 4. Compare and decide if update is needed
+      - name: Check if update needed
+        id: check
+        run: |
+          LATEST="${{ steps.latest-release.outputs.tag }}"
+          CURRENT="${{ steps.current-version.outputs.version }}"
+          echo "Latest:  ${LATEST}"
+          echo "Current: ${CURRENT}"
+
+          if [ "${LATEST}" = "${CURRENT}" ]; then
+            echo "up-to-date=true" >> "$GITHUB_OUTPUT"
+            echo "Already at latest version. Nothing to do."
+          else
+            echo "up-to-date=false" >> "$GITHUB_OUTPUT"
+            echo "Update required: ${CURRENT} -> ${LATEST}"
+          fi
+
+      # 5. Update drawio submodule to latest release tag
+      - name: Update drawio submodule
+        if: steps.check.outputs.up-to-date == 'false'
+        run: |
+          cd drawio
+          git fetch origin tag "${{ steps.latest-release.outputs.tag }}"
+          git checkout "tags/${{ steps.latest-release.outputs.tag }}"
+          cd ..
+          echo "Submodule updated to ${{ steps.latest-release.outputs.tag }}"
+
+      # 6. Setup Node.js
+      - name: Setup Node.js
+        if: steps.check.outputs.up-to-date == 'false'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'yarn'
+
+      # 7. Install dependencies and build extension
+      - name: Install dependencies and build
+        if: steps.check.outputs.up-to-date == 'false'
+        run: |
+          yarn install --frozen-lockfile
+          yarn build
+
+      # 8. Package .vsix file
+      - name: Package VSIX
+        if: steps.check.outputs.up-to-date == 'false'
+        run: yarn package-extension-stable
+
+      # 9. Verify .vsix was created
+      - name: Verify VSIX artifact
+        if: steps.check.outputs.up-to-date == 'false'
+        run: |
+          if [ -f dist/extension.vsix ]; then
+            echo "VSIX created: $(ls -lh dist/extension.vsix)"
+          else
+            echo "ERROR: dist/extension.vsix not found!"
+            exit 1
+          fi
+
+      # 10. Commit and push submodule update
+      - name: Commit and push submodule update
+        if: steps.check.outputs.up-to-date == 'false'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add drawio
+          git commit -m "chore: update drawio submodule to ${{ steps.latest-release.outputs.tag }}" || echo "No changes to commit"
+          git push origin HEAD:main
+
+      # 11. Create GitHub Release with .vsix artifact
+      - name: Create GitHub Release
+        if: steps.check.outputs.up-to-date == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: drawio-${{ steps.latest-release.outputs.tag }}
+          name: "Draw.io ${{ steps.latest-release.outputs.tag }}"
+          body: |
+            ## Auto-Built VSIX with draw.io ${{ steps.latest-release.outputs.tag }}
+
+            This release was automatically generated from the latest [jgraph/drawio](https://github.com/jgraph/drawio) release.
+
+            ### What's included
+            - Draw.io version: **${{ steps.latest-release.outputs.tag }}**
+            - Extension version: 1.9.0 (from package.json)
+            - Built on: ${{ github.event.repository.updated_at }}
+
+            ### Installation
+            ```bash
+            code --install-extension extension.vsix
+            ```
+
+            > ⚠️ This is an unofficial build. Use at your own risk.
+          files: dist/extension.vsix
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+
+      # 12. Upload .vsix as workflow artifact (backup)
+      - name: Upload VSIX as workflow artifact
+        if: steps.check.outputs.up-to-date == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: vscode-drawio-${{ steps.latest-release.outputs.tag }}
+          path: dist/extension.vsix
+          retention-days: 90
