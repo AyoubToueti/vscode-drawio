@@ -83,12 +83,12 @@ jobs:
         run: |
           sed -i 's|"publisher": "hediet"|"publisher": "ayoubtoueti"|' package.json
 
-      # 7. Install dependencies and build extension
-      - name: Install dependencies and build
+      # 7. Install dependencies and compile extension (without packaging)
+      - name: Install dependencies and compile
         if: steps.check.outputs.up-to-date == 'false'
         run: |
           yarn install --frozen-lockfile
-          yarn build
+          yarn build-extension && yarn build-plugins
 
       # 8. Package .vsix file (with --allow-unused-files-pattern to handle missing dirs in newer drawio)
       - name: Package VSIX
